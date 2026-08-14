@@ -1,8 +1,19 @@
-# Data Processing
+# Data Processing (8.15)
+
+**8.15 objectives covered here:**
+1. Define a mapping that satisfies a given set of requirements
+2. Define and use multi-fields with different data types and/or analyzers
+3. Use the Reindex API and Update By Query API to reindex and/or update documents
+4. Define and use an ingest pipeline that satisfies a given set of requirements
+5. Define runtime fields to retrieve custom values using Painless scripting :sparkles: *(new since 8.1)*
+
+> :books: "Define and use a custom analyzer" and "Configure an index so that it properly maintains the relationships of nested arrays of objects" are **no longer separate objectives** in 8.15. Custom analyzers are still needed for the multi-fields objective so they stay inline below; nested objects are moved to a clearly-marked bonus section at the bottom.
+
+---
 
 #  Define a mapping that satisfies a given set of requirements
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/mapping.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/mapping.html
 > Mapping is the process of defining how a document, and the fields it contains, are stored and indexed.
 
 > Each document is a collection of fields, which each have their own data type. When mapping your data, you create a mapping definition, which contains a list of fields that are pertinent to the document. 
@@ -30,7 +41,7 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.1/mapping.html
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/mapping-types.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/mapping-types.html
 
 
 ### Mapping numeric identifiers
@@ -44,7 +55,7 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.1/mapping-types.html
 > - Fast retrieval is important. term query searches on keyword fields are often faster than term searches on numeric fields.
 > 
 > If you’re unsure which to use, you can use a multi-field to map the data as both a keyword and a numeric data type.
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/doc-values.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/doc-values.html
 > All fields which support doc values have them enabled by default. If you are sure that you __don’t need to sort or aggregate__ on a field, or access the field value from a script, you can disable doc values in order to save disk space
 
 
@@ -115,20 +126,92 @@ POST _reindex
 </details>
 <hr/>
 
-3. verify that the data only contains `HENRY IV` play lines.
+:question: 3. verify that the data only contains `HENRY IV` play lines.
 
-#TBC
+<details>
+  <summary>View Solution (click to reveal)</summary>
 
+If only one play is present, a terms aggregation on `play_name` returns exactly one bucket:
 
-#  Define and use a custom analyzer that satisfies a given set of requirements
+```json
+GET henry4/_search?filter_path=aggregations
+{
+  "size": 0,
+  "aggs": {
+    "plays": { "terms": { "field": "play_name", "size": 20 } }
+  }
+}
+
+// output - one bucket, doc_count matching the reindex "created" count
+{
+  "aggregations": {
+    "plays": {
+      "buckets": [ { "key": "Henry IV", "doc_count": 3205 } ]
+    }
+  }
+}
+```
+
+Or prove the negative:
+```json
+GET henry4/_count
+{
+  "query": {
+    "bool": { "must_not": [ { "term": { "play_name": "Henry IV" } } ] }
+  }
+}
+// expect "count": 0
+```
+</details>
+<hr/>
+
+## Mapping parameters worth memorising
+
+The wording of "satisfies a given set of requirements" maps almost one-to-one onto these:
+
+| Requirement wording | Mapping parameter |
+| --- | --- |
+| "not aggregatable / not sortable" | `"doc_values": false` |
+| "searchable but not returned" / "do not index" | `"index": false` |
+| "must not be stored in `_source`" | `"_source": { "excludes": ["field"] }` |
+| "ignore values longer than N" | `"ignore_above": N` |
+| "do not reject malformed values" | `"ignore_malformed": true` |
+| "accept these date formats" | `"format": "yyyy-MM-dd||epoch_millis"` |
+| "use this value when the field is missing" | `"null_value": "NONE"` |
+| "field should be searchable by two different names" | `"copy_to": "combined_field"` |
+| "reject unknown fields" | `"dynamic": "strict"` at the mapping root |
+| "count of occurrences should not affect score" | `"norms": false` / `"index_options": "docs"` |
+| "must be an exact match, case-insensitive" | `keyword` + a `normalizer` |
+
+## Changing a mapping after the fact
+
+```json
+// Adding a NEW field is allowed:
+PUT henry4/_mapping
+{ "properties": { "act": { "type": "keyword" } } }
+
+// Changing an EXISTING field's type is NOT.
+// The answer is always: create a new index with the right mapping, then _reindex.
+```
+
+Useful checks:
+```json
+GET henry4/_mapping
+GET henry4/_mapping/field/line_id
+GET henry4/_field_caps?fields=*
+```
+
+---
+
+#  (Background) Define and use a custom analyzer
 
 and
 
 # Define and use multi-fields with different data types and/or analyzers
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/mapping-types.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/analyzer.html  <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/analysis-standard-analyzer.html  <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/analysis-custom-analyzer.html#_configuration
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/mapping-types.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/analyzer.html  <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/analysis-standard-analyzer.html  <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/analysis-custom-analyzer.html#_configuration
 
 :question: 1. Write a custom analyzer that changes the name of `PRINCE HENRY` to `WAYWARD PRINCE HAL` in the `speaker` field, add this to a new index called `henry4_hal`
 
@@ -285,16 +368,234 @@ GET henry4_hal/_search
 > NOTE: Oddly you can't see the `HAL` or `WAYWARD` in the returned data, but you can search for it.
 > What you get returned is the original data `PRINCE HENRY`
 
-#TBC check why this is.
+:bulb: **This is expected, not a bug.** `_source` is the raw JSON you sent — analysers only affect the *inverted index*, never `_source`. So you search for `HAL` and match, but you get `PRINCE HENRY` back. Prove what was actually indexed with the termvectors API:
+
+```json
+GET henry4_hal/_termvectors/<doc_id>?fields=speaker
+```
 </details>
 <hr/>
 
+## Multi-fields — the actual 8.15 objective
 
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/multi-fields.html
 
+> It is often useful to index the same field in different ways for different purposes. This is the purpose of multi-fields. Most field types support multi-fields via the `fields` parameter.
+
+Three things a question can ask for, and they are frequently combined:
+
+1. **Different data types** — `text` for search + `keyword` for sort/aggregate
+2. **Different analyzers** — e.g. `standard` + `english` for stemming
+3. **A normalizer** — a `keyword` sub-field that is lowercased for case-insensitive exact matching
+
+:warning: Multi-fields **cannot be added retrospectively to existing documents' index data**. You can add the sub-field to the mapping, but existing docs are only searchable through it after a `_reindex` or an `_update_by_query` (which re-indexes each doc in place).
+
+<hr>
+
+:question: Create an index `plays` where the `title` field is:
+- full-text searchable with the standard analyzer
+- also searchable with English stemming, under `title.english`
+- also sortable/aggregatable as an exact value, under `title.raw`
+- also matchable case-insensitively as an exact value, under `title.ci`
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+```json
+PUT plays
+{
+  "settings": {
+    "number_of_replicas": 0,
+    "analysis": {
+      "normalizer": {
+        "lowercase_normalizer": {
+          "type": "custom",
+          "char_filter": [],
+          "filter": ["lowercase", "asciifolding"]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "title": {
+        "type": "text",
+        "analyzer": "standard",
+        "fields": {
+          "english": {
+            "type": "text",
+            "analyzer": "english"
+          },
+          "raw": {
+            "type": "keyword",
+            "ignore_above": 256
+          },
+          "ci": {
+            "type": "keyword",
+            "normalizer": "lowercase_normalizer"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Test each path:
+```json
+POST plays/_doc?refresh
+{ "title": "The Tragedy of Hamlet, Prince of Denmark" }
+
+// stemming - "tragedies" matches "Tragedy" only via the english sub-field
+GET plays/_search
+{ "query": { "match": { "title.english": "tragedies" } } }
+
+// exact value - full string, case sensitive
+GET plays/_search
+{ "query": { "term": { "title.raw": "The Tragedy of Hamlet, Prince of Denmark" } } }
+
+// exact value, case insensitive
+GET plays/_search
+{ "query": { "term": { "title.ci": "the tragedy of hamlet, prince of denmark" } } }
+
+// aggregate on the keyword sub-field
+GET plays/_search?filter_path=aggregations
+{ "size": 0, "aggs": { "titles": { "terms": { "field": "title.raw" } } } }
+```
+
+:bulb: Always verify an analyzer with `_analyze` before you commit to it:
+```json
+GET plays/_analyze
+{ "field": "title.english", "text": "The Tragedy of Hamlet" }
+```
+</details>
+<hr>
+
+:question: You need a different analyzer at index time and at search time (index with an edge-ngram for autocomplete, search with the standard analyzer). How?
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+`search_analyzer` overrides `analyzer` at query time. This is the classic autocomplete recipe — without it, the search terms get ngrammed too and everything matches everything:
+
+```json
+PUT autocomplete-idx
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "autocomplete_index": {
+          "type": "custom",
+          "tokenizer": "standard",
+          "filter": ["lowercase", "edge_ngrams"]
+        }
+      },
+      "filter": {
+        "edge_ngrams": {
+          "type": "edge_ngram",
+          "min_gram": 2,
+          "max_gram": 15
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "name": {
+        "type": "text",
+        "analyzer": "autocomplete_index",
+        "search_analyzer": "standard"
+      }
+    }
+  }
+}
+```
+</details>
+<hr>
+
+## Analyzer anatomy (needed for the multi-fields objective)
+
+An analyzer is exactly three stages, in this order:
+
+| Stage | Count | Examples |
+| --- | --- | --- |
+| `char_filter` | 0..n | `html_strip`, `mapping`, `pattern_replace` |
+| `tokenizer` | exactly 1 | `standard`, `keyword`, `whitespace`, `pattern`, `edge_ngram`, `path_hierarchy` |
+| `filter` (token filters) | 0..n | `lowercase`, `stop`, `stemmer`, `synonym`, `asciifolding`, `edge_ngram` |
+
+Test any combination without creating an index:
+```json
+POST _analyze
+{
+  "char_filter": ["html_strip"],
+  "tokenizer": "standard",
+  "filter": ["lowercase", "stop"],
+  "text": "<p>The QUICK brown Foxes</p>"
+}
+```
+
+Test a named analyzer inside an existing index:
+```json
+POST my-index/_analyze
+{ "analyzer": "my_custom_analyzer", "text": "some text" }
+```
 
 
 
 # Use the Reindex API and Update By Query API to reindex and/or update documents
+
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/docs-reindex.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/docs-update-by-query.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/docs-delete-by-query.html
+
+## Which API for which question
+
+| Question says | Use |
+| --- | --- |
+| "copy / migrate data into a new index (with a new mapping)" | `_reindex` |
+| "change the values of documents **in place**" | `_update_by_query` |
+| "apply a new mapping to existing documents" (mapping already changed) | `_update_by_query` with no body — it just re-indexes each doc |
+| "run documents through a pipeline" | either, with `?pipeline=` (UBQ) or `"dest": { "pipeline": "..." }` (reindex) |
+| "remove documents matching X" | `_delete_by_query` |
+
+## Options that come up
+
+```json
+POST _reindex?wait_for_completion=false&refresh=true
+{
+  "conflicts": "proceed",                 // don't abort on version conflicts
+  "max_docs": 1000,                       // limit how many documents are processed
+  "source": {
+    "index": "accounts-raw",
+    "query":  { "term": { "gender.keyword": "F" } },
+    "_source": ["firstname", "lastname", "balance"],   // only copy some fields
+    "size": 1000                          // batch size
+  },
+  "dest": {
+    "index": "accounts-female",
+    "op_type": "create",                  // fail instead of overwriting existing ids
+    "pipeline": "accounts-ingest"
+  },
+  "script": {
+    "lang": "painless",
+    "source": "ctx._source.migrated = true"
+  }
+}
+```
+
+:bulb: `wait_for_completion=false` returns a **task id** immediately — this is the right answer for "reindex a large index without blocking". Then:
+```json
+GET _tasks/<task_id>
+GET _tasks?actions=*reindex&detailed
+POST _tasks/<task_id>/_cancel
+```
+
+:warning: Gotchas:
+- `_reindex` requires `_source` to be **enabled** on the source index.
+- `_reindex` does **not** copy settings, mappings, aliases, or the ILM policy — create the destination index (or its template) first.
+- Reindexing into a **data stream** requires `"op_type": "create"`.
+- A `_reindex` from a remote cluster needs `reindex.remote.whitelist` in `elasticsearch.yml` and a `"remote": { "host": ..., "username": ..., "password": ... }` block in `source`.
+- Inside a reindex/UBQ **script**, you write to `ctx._source.field`. Inside an **ingest pipeline** script processor you write to `ctx.field`. Mixing these up is the most common silent failure in this section.
 
 ## Part 1
 :question: Reindex the `accounts-raw` index into `accounts-2021`.
@@ -304,7 +605,7 @@ GET henry4_hal/_search
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/docs-update-by-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/docs-update-by-query.html
 > :warning: 
 Reindex requires _source to be enabled for all documents in the source index.
 
@@ -480,7 +781,107 @@ GET /accounts-2021/_doc/_mget?filter_path=*.*.balance
 </details>
 <hr>
 
-# Define and use an ingest pipeline that satisfies a given set of requirements, including the use of Painless to modify documents
+# Define and use an ingest pipeline that satisfies a given set of requirements
+
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ingest.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/processors.html
+
+## Processors you should recognise on sight
+
+| Processor | Does |
+| --- | --- |
+| `set` | set a field to a value (supports `{{{field}}}` mustache templating) |
+| `append` | add a value to an array field (creates the array if needed) |
+| `remove` | delete a field |
+| `rename` | rename a field |
+| `convert` | change type: `integer`, `long`, `float`, `double`, `string`, `boolean`, `ip`, `auto` |
+| `gsub` | regex replace inside a string field |
+| `split` / `join` | string ↔ array |
+| `trim`, `lowercase`, `uppercase` | string cleanup |
+| `grok` | parse unstructured text into fields with named patterns |
+| `dissect` | faster, simpler alternative to grok for fixed-delimiter text |
+| `date` | parse a string into `@timestamp` |
+| `date_index_name` | route a doc to a date-based index |
+| `json` | parse a JSON string into an object |
+| `kv` | parse `key=value` pairs |
+| `dot_expander` | turn `a.b` into a nested object |
+| `script` | anything the above cannot do (Painless) |
+| `fail` / `drop` | reject or silently discard a document |
+| `pipeline` | call another pipeline |
+| `enrich` | join in data from another index (needs an enrich policy) |
+| `foreach` | run a processor over every element of an array |
+
+## Options every processor supports
+
+```json
+{
+  "set": {
+    "field": "full_name",
+    "value": "{{{firstname}}} {{{lastname}}}",
+    "if": "ctx.firstname != null",       // conditional (ctx is READ-ONLY here)
+    "ignore_failure": true,              // keep going if this one processor fails
+    "tag": "set full_name",              // shows up in _simulate output - name your processors
+    "on_failure": [                      // per-processor error handling
+      { "set": { "field": "error", "value": "{{{_ingest.on_failure_message}}}" } }
+    ]
+  }
+}
+```
+
+And the pipeline itself can have a top-level `on_failure`:
+```json
+PUT _ingest/pipeline/safe-pipeline
+{
+  "processors": [ { "convert": { "field": "age", "type": "integer" } } ],
+  "on_failure": [
+    { "set": { "field": "ingest_error", "value": "{{{_ingest.on_failure_message}}}" } }
+  ]
+}
+```
+
+## The four ways to actually *use* a pipeline
+
+```json
+// 1. per-request, on indexing
+POST accounts-2021/_doc?pipeline=accounts-ingest
+{ "firstname": "Ada", "lastname": "Lovelace" }
+
+// 2. on an existing index, in place
+POST accounts-2021/_update_by_query?pipeline=accounts-ingest
+
+// 3. as part of a reindex
+POST _reindex
+{ "source": { "index": "a" }, "dest": { "index": "b", "pipeline": "accounts-ingest" } }
+
+// 4. as an index default, so every write uses it automatically
+PUT accounts-2021/_settings
+{
+  "index.default_pipeline": "accounts-ingest"
+}
+```
+:bulb: `index.final_pipeline` runs *after* `default_pipeline` and after any `?pipeline=` request parameter — use it for "always stamp this field no matter what".
+
+## Simulating
+
+Two forms — learn both. The first tests a pipeline body you have not saved yet, the second tests one you already created:
+
+```json
+POST _ingest/pipeline/_simulate            // inline pipeline
+{ "pipeline": { "processors": [ ... ] }, "docs": [ { "_source": { ... } } ] }
+
+POST _ingest/pipeline/accounts-ingest/_simulate?verbose    // saved pipeline, step by step
+{ "docs": [ { "_source": { ... } } ] }
+```
+:bulb: `?verbose` shows the document after **each** processor — invaluable when a five-processor pipeline produces the wrong answer and you need to know which step broke it.
+
+Housekeeping:
+```json
+GET _ingest/pipeline                 // list all
+GET _ingest/pipeline/accounts-ingest
+DELETE _ingest/pipeline/accounts-ingest
+```
+
+<hr>
 
 :question: Apply a pipeline called `accounts-ingest` to the data in `accounts-2021` with the following requirements:
 
@@ -494,15 +895,15 @@ GET /accounts-2021/_doc/_mget?filter_path=*.*.balance
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ingest.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ingest-apis.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ingest.html#access-source-fields <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ingest.html#access-metadata-fields <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ingest.html#access-ingest-metadata <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/processors.html   <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/script-processor.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/set-processor.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/append-processor.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ingest.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ingest-apis.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ingest.html#access-source-fields <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ingest.html#access-metadata-fields <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ingest.html#access-ingest-metadata <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/processors.html   <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/script-processor.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/set-processor.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/append-processor.html <br>
 
 > :warning: The value of ctx is read-only in if conditions.
 
@@ -729,8 +1130,246 @@ GET accounts-2021/_doc/25?filter_path=*.balance,*.full_name,*.tags
 </details>
 <hr>
 
-# Configure an index so that it properly maintains the relationships of nested arrays of objects <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/nested.html <br>
+# Define runtime fields to retrieve custom values using Painless scripting
+
+:sparkles: **New objective in 8.15** — it did not exist on the 8.1 list.
+
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/runtime.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/runtime-mapping-fields.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/runtime-retrieving-fields.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/modules-scripting-painless.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/painless-runtime-fields-context.html
+
+> A runtime field is a field that is evaluated **at query time**. Runtime fields let you add fields to existing documents without reindexing your data, and they consume no index space.
+
+:bulb: The **Searching Data** objective ("write a search that utilizes a runtime field") is the query side; see [Searching_Data.md](Searching_Data.md). This objective is the **definition** side — getting the Painless right.
+
+## Supported runtime field types
+
+`boolean`, `composite`, `date`, `double`, `geo_point`, `ip`, `keyword`, `long`, `lookup`
+
+## The Painless rules for runtime fields
+
+1. You **must** call `emit(...)` to produce a value. A runtime script that returns a value instead of emitting one does nothing.
+2. Read the source document with `doc['field']` (doc values, fast) or `params._source['field']` (raw JSON, slower but works on non-doc-value fields).
+3. `doc['field'].value` **throws** if the field is missing on a document. Guard it with `doc['field'].size() != 0`, or just `return;` early.
+4. You can `emit()` more than once — a runtime field can be multi-valued.
+5. For `date` runtime fields, `emit()` takes epoch milliseconds: `emit(doc['t'].value.toInstant().toEpochMilli())`.
+6. Use triple-quoted strings `"""..."""` for multi-line scripts so you don't have to escape quotes.
+
+## The three places you can define one
+
+### 1. In the index mapping, at creation time
+
+```json
+PUT totality-raw-runtime
+{
+  "mappings": {
+    "runtime": {
+      "total_time_seconds": {
+        "type": "long",
+        "script": {
+          "source": "emit((doc['totality_minutes'].value * 60) + doc['totality_seconds'].value)"
+        }
+      }
+    },
+    "properties": {
+      "totality_seconds": { "type": "long" },
+      "totality_minutes": { "type": "long" }
+    }
+  }
+}
+```
+
+### 2. Added to an existing index's mapping
+
+This is the headline feature — no reindex, applies to every document already in the index, and takes effect immediately:
+
+```json
+PUT totality-raw/_mapping
+{
+  "runtime": {
+    "total_time_seconds": {
+      "type": "long",
+      "script": {
+        "source": """
+          if (doc['totality_minutes'].size() == 0 || doc['totality_seconds'].size() == 0) { return; }
+          emit((doc['totality_minutes'].value * 60) + doc['totality_seconds'].value);
+        """
+      }
+    }
+  }
+}
+```
+
+Remove it again just as cheaply — `null` deletes it:
+```json
+PUT totality-raw/_mapping
+{
+  "runtime": {
+    "total_time_seconds": null
+  }
+}
+```
+
+### 3. In a single search request (`runtime_mappings`)
+
+Scoped to that one request; nothing is persisted.
+
+```json
+GET totality-raw/_search
+{
+  "runtime_mappings": {
+    "total_time_seconds": {
+      "type": "long",
+      "script": {
+        "source": "emit((doc['totality_minutes'].value * 60) + doc['totality_seconds'].value)"
+      }
+    }
+  },
+  "fields": ["total_time_seconds"],
+  "_source": false,
+  "size": 5
+}
+```
+
+:warning: **Retrieve with `fields`, never `_source`.** Runtime fields are not in `_source` and never will be.
+
+<hr>
+
+:question: 1. On the `shakespeare` index, define a runtime field `speaker_type` in the **mapping** that emits `"king"` when the speaker's name starts with `KING`, `"queen"` when it starts with `QUEEN`, and `"other"` otherwise. Then aggregate on it.
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+```json
+PUT shakespeare/_mapping
+{
+  "runtime": {
+    "speaker_type": {
+      "type": "keyword",
+      "script": {
+        "source": """
+          if (doc['speaker'].size() == 0) { emit('unknown'); return; }
+          String s = doc['speaker'].value;
+          if (s.startsWith('KING'))       { emit('king');  }
+          else if (s.startsWith('QUEEN')) { emit('queen'); }
+          else                            { emit('other'); }
+        """
+      }
+    }
+  }
+}
+```
+
+Use it:
+```json
+GET shakespeare/_search?filter_path=aggregations
+{
+  "size": 0,
+  "aggs": {
+    "by_type": { "terms": { "field": "speaker_type" } }
+  }
+}
+```
+</details>
+<hr>
+
+:question: 2. Define a runtime field that extracts the **domain** from an `email` keyword field, in a search request only.
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+```json
+GET accounts-raw/_search?filter_path=aggregations
+{
+  "size": 0,
+  "runtime_mappings": {
+    "email_domain": {
+      "type": "keyword",
+      "script": {
+        "source": """
+          if (doc['email'].size() == 0) { return; }
+          String e = doc['email'].value;
+          int at = e.indexOf('@');
+          if (at > 0) { emit(e.substring(at + 1)); }
+        """
+      }
+    }
+  },
+  "aggs": {
+    "domains": { "terms": { "field": "email_domain", "size": 10 } }
+  }
+}
+```
+
+:bulb: The `grok`/`dissect` Painless helpers also work in runtime scripts and are far cleaner for log parsing:
+```json
+"source": "emit(grok('%{IP:client_ip} .*').extract(doc['message'].value)?.client_ip)"
+```
+</details>
+<hr>
+
+:question: 3. Define a `date` runtime field `order_day` that emits the order date truncated to the day, and a `boolean` runtime field `is_weekend`.
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+```json
+GET kibana_sample_data_ecommerce/_search
+{
+  "runtime_mappings": {
+    "order_day": {
+      "type": "date",
+      "script": {
+        "source": "emit(doc['order_date'].value.toInstant().toEpochMilli())"
+      }
+    },
+    "is_weekend": {
+      "type": "boolean",
+      "script": {
+        "source": """
+          int d = doc['order_date'].value.getDayOfWeekEnum().getValue();
+          emit(d == 6 || d == 7);
+        """
+      }
+    }
+  },
+  "size": 3,
+  "fields": [ "order_day", "is_weekend" ],
+  "_source": false
+}
+```
+</details>
+<hr>
+
+## Also worth knowing: `"dynamic": "runtime"`
+
+Instead of indexing every unknown field, map new fields as runtime fields — searchable, zero index cost:
+
+```json
+PUT logs-runtime
+{
+  "mappings": {
+    "dynamic": "runtime",
+    "properties": {
+      "@timestamp": { "type": "date" }
+    }
+  }
+}
+```
+
+## Promoting a runtime field to an indexed field
+
+If a runtime field turns out to be queried constantly, the "make it fast" answer is: add it as a real field in the mapping and `_reindex` (or `_update_by_query`) so it gets indexed. Queries do not change — the indexed field simply shadows the runtime one.
+
+---
+---
+
+# :books: BONUS — no longer a listed 8.15 objective
+
+# (Bonus) Configure an index so that it properly maintains the relationships of nested arrays of objects <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/nested.html <br>
 :question: 1. Using the below data, create an index with a mapping that allows for relationships to be queried.
 
 ```json

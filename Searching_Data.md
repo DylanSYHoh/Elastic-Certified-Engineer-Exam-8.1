@@ -1,6 +1,15 @@
-# Searching Data
+# Searching Data (8.15)
 
 :warning: These example questions use the eCommerce sample data and the Shakespeare data.
+
+**8.15 objectives covered here:**
+1. Write and execute a search query for terms and/or phrases in one or more fields of an index
+2. Write and execute a search query that is a Boolean combination of multiple queries and filters
+3. Write an asynchronous search
+4. Write and execute metric and bucket aggregations
+5. Write and execute aggregations that contain sub-aggregations
+6. Write and execute a query that searches across multiple clusters
+7. Write and execute a search that utilizes a runtime field
 
 
 # Prerequisite
@@ -41,7 +50,7 @@ $ curl -u "elastic:Password01" -s -H "Content-Type: application/x-ndjson" -XPUT 
 
 :bulb: `text_entry` is the field we are querying.  `match` is the type of query.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-match-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-match-query.html
 
 > Returns documents that match a provided text, number, date or boolean value. The provided text is analyzed before matching.
 >
@@ -105,7 +114,7 @@ GET shakespeare/_search
 
 > Like the match query but used for matching exact phrases or word proximity matches.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-match-query-phrase.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-match-query-phrase.html
 
 > The match_phrase query analyzes the text and creates a phrase query out of the analyzed text.
 
@@ -132,7 +141,7 @@ GET shakespeare/_search
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-multi-match-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-multi-match-query.html
 
 > The multi-field version of the match query.
 
@@ -160,16 +169,16 @@ GET shakespeare/_search
 
 > You can use term-level queries to find documents `based on precise values` in structured data. Examples of structured data include date ranges, IP addresses, prices, or product IDs.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/term-level-queries.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/term-level-queries.html
 
 
 > The full text queries enable you to search analyzed text fields such as the body of an email. The query string is processed using the same analyzer that was applied to the field during indexing.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/full-text-queries.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/full-text-queries.html
 
 > The match_phrase query analyzes the text and creates a phrase query out of the analyzed text.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-match-query-phrase.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-match-query-phrase.html
 
 
 :question: How many times is `Hamlet` mentioned as a play in the `shakespeare` index?
@@ -177,7 +186,7 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-match-quer
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-terms-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-terms-query.html
 
 > Returns documents that contain one or more `exact` terms in a provided field.
 
@@ -252,7 +261,7 @@ GET shakespeare/_search
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-wildcard-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-wildcard-query.html
 
 > Returns documents that contain terms matching a wildcard pattern.
 
@@ -277,7 +286,7 @@ GET shakespeare/_search
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-regexp-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-regexp-query.html
 
 > Returns documents that contain terms matching a regular expression.
 
@@ -305,7 +314,7 @@ GET shakespeare/_search
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-range-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-range-query.html
 
 > Returns documents that contain terms within a provided range.
 
@@ -333,9 +342,9 @@ GET shakespeare/_search
 
 # Write and execute a search query that is a Boolean combination of multiple queries and filters
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/compound-queries.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/compound-queries.html
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/query-dsl-bool-query.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-bool-query.html
 
 
 
@@ -438,7 +447,7 @@ GET shakespeare/_search
 
 # Write an asynchronous search
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/async-search.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/async-search.html
 
 > The async search API let you asynchronously execute a search request, monitor its progress, and retrieve partial results as they become available.
 
@@ -447,12 +456,23 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.1/async-search.html
 >
 >Returns an `id`.
 
-:warning: These are easy to write but hard to do in the lab as you need so much data to do a slow query, to get the `POST` to return an `id`.
+:warning: These are easy to write but hard to demo in the lab as you need so much data to make the query slow enough for the `POST` to return an `id` rather than a finished result.
 
 It is better to be aware of the concepts and be able to look this up in the online manuals in the exam.
 
+## The parameters that get marked
+
+| Parameter | Default | What it does |
+| --- | --- | --- |
+| `wait_for_completion_timeout` | `1s` | how long to block before giving up and returning an `id`. **Set this to something tiny (`0` / `10ms`) if you want to force an async response for a demo.** |
+| `keep_alive` | `5d` | how long the results are retained after completion |
+| `keep_on_completion` | `false` | if `true`, results are stored even when the search finished within `wait_for_completion_timeout`. **You need this to be able to `GET` the results by id at all for a fast search.** |
+| `batched_reduce_size` | `5` | how often partial results are refreshed |
+
+:bulb: If a question says "run this as an async search and then retrieve the results", you almost certainly need `keep_on_completion=true`, otherwise a fast search returns inline and the id is never stored.
+
 ```json
-POST /kibana_sample_data_logs/_async_search?size=0
+POST /kibana_sample_data_logs/_async_search?size=0&wait_for_completion_timeout=10ms&keep_on_completion=true&keep_alive=1d
 {
   "sort": [
     { "@timestamp": { "order": "asc" } }
@@ -515,15 +535,15 @@ DELETE /_async_search/FmRldE8zREVEUzA2ZVpUeGs2ejJFUFEaMkZ5QTVrSTZSaVN3WlNFVmtlWH
 
 We will be using the `kibana_sample_data_ecommerce` index data for these examples.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/search-aggregations.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/search-aggregations.html
 
 Show only the aggs results, and not all of the matches: 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/search-aggregations.html#return-only-agg-results
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/search-aggregations.html#return-only-agg-results
 
 
 ## Metric Aggregations
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/search-aggregations-metrics.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/search-aggregations-metrics.html
 
 ### Common
 - Avg Aggregation
@@ -552,7 +572,7 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.1/search-aggregations-
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/search-aggregations-metrics-extendedstats-aggregation.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/search-aggregations-metrics-extendedstats-aggregation.html
 
 > Note: We use `"size": 0` to only return the aggs results and not all the actual matching documents.
 
@@ -602,7 +622,7 @@ GET kibana_sample_data_ecommerce/_search?filter_path=aggregations
 
 ## Bucket Aggregations
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/search-aggregations-bucket.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/search-aggregations-bucket.html
 
 
 - Adjacency Matrix Aggregation
@@ -806,29 +826,240 @@ GET kibana_sample_data_ecommerce/_search?filter_path=aggregations
 
 # Write and execute a query that searches across multiple clusters
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/search-search.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/modules-cross-cluster-search.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/search-search.html
 
-#TODO:  Need a couple of clusters, though the theory is easy
+:bulb: **Setting up** the remote cluster connection is the Cluster Management objective — see [Cluster_Management.md](Cluster_Management.md). This objective is only about *writing the query* once the remote is registered.
 
 > Note: just split the remote clusters with commas
 
 > Then append the index to each with a colon
 
-local_index,remote1:index1,remote2:index2
+`local_index,remote1:index1,remote2:index2`
 
 <details>
   <summary>View Solution (click to reveal)</summary>
 
 ```json
-GET local_index,remote_cluster1:that_remote_index,remote_cluster2:that_other_remote_index
+GET local_index,remote_cluster1:that_remote_index,remote_cluster2:that_other_remote_index/_search
 {
-  "query" : {
-    "match_all" : {}
+  "query": {
+    "match_all": {}
   }
 }
 ```
 </details>
 <hr>
 
-# Write and execute a search that utilizes a runtime field <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/current/runtime-search-request.html
+## Syntax patterns you should be able to write cold
+
+```json
+// one remote index only
+GET cluster_one:kibana_sample_data_ecommerce/_search
+{ "query": { "match_all": {} } }
+
+// local + two remotes
+GET kibana_sample_data_ecommerce,cluster_one:kibana_sample_data_ecommerce,cluster_two:kibana_sample_data_ecommerce/_search
+{ "query": { "match": { "customer_gender": "FEMALE" } } }
+
+// wildcards work on BOTH sides of the colon
+GET *:logs-*,logs-*/_search
+{ "query": { "match_all": {} } }
+
+// exclude a cluster
+GET *:logs-*,-cluster_three:logs-*/_search
+{ "query": { "match_all": {} } }
+```
+
+## Useful extras
+
+```json
+// Which clusters/indices would this pattern actually hit, and are they reachable?
+// (the _resolve/cluster API, added in 8.13 - very handy for debugging CCS in the exam)
+GET _resolve/cluster/*:logs-*
+
+// Which remotes are configured, and is the connection up?
+GET _remote/info
+```
+
+:warning: Behaviour worth knowing:
+- `skip_unavailable: true` on a remote means a search still succeeds (with `_clusters.skipped` incremented) when that cluster is down. If it is `false` (the default in 8.15) the whole search fails.
+- `ccs_minimize_roundtrips` (default `true`) sends the query to each remote and reduces there. Set it to `false` when you need accurate global scoring or use `scroll` (scroll does not support minimised roundtrips).
+- The response contains a `_clusters` block — `total`, `successful`, `skipped` — which is how you prove a CCS query really went cross-cluster.
+- CCS also works with `_async_search`, which is the recommended way to run long cross-cluster searches.
+
+---
+
+# Write and execute a search that utilizes a runtime field
+
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/runtime.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/runtime-search-request.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/runtime-retrieving-fields.html
+
+:bulb: **Defining** runtime fields with Painless is the Data Processing objective — the three ways to define one, plus the Painless syntax, are in [Data_Processing.md](Data_Processing.md). This objective is about *searching* with them.
+
+A runtime field is evaluated at **query time**. It is not indexed, does not appear in `_source`, and costs nothing to add or change. That is the whole point: you can fix a bad mapping decision without reindexing 500GB of data.
+
+## The three things you must be able to do
+
+### 1. Define a runtime field inline in the search request
+
+Everything lives under `runtime_mappings`. The field exists only for the duration of this one request.
+
+```json
+GET kibana_sample_data_ecommerce/_search
+{
+  "runtime_mappings": {
+    "profit": {
+      "type": "double",
+      "script": {
+        "source": "emit(doc['taxful_total_price'].value - doc['taxless_total_price'].value)"
+      }
+    }
+  },
+  "size": 3,
+  "fields": ["profit", "taxful_total_price"],
+  "_source": false
+}
+```
+
+:warning: **`fields` is how you get the value back.** A runtime field will never show up in `_source`, so if you forget the `fields` parameter the query "works" but returns nothing visible — a classic way to lose marks.
+
+### 2. Query on a runtime field
+
+```json
+GET kibana_sample_data_ecommerce/_search
+{
+  "runtime_mappings": {
+    "profit": {
+      "type": "double",
+      "script": {
+        "source": "emit(doc['taxful_total_price'].value - doc['taxless_total_price'].value)"
+      }
+    }
+  },
+  "query": {
+    "range": {
+      "profit": { "gte": 20 }
+    }
+  },
+  "fields": ["profit"],
+  "_source": false
+}
+```
+
+### 3. Aggregate on a runtime field
+
+```json
+GET kibana_sample_data_ecommerce/_search?filter_path=aggregations
+{
+  "size": 0,
+  "runtime_mappings": {
+    "day_of_week_num": {
+      "type": "long",
+      "script": {
+        "source": "emit(doc['order_date'].value.getDayOfWeekEnum().getValue())"
+      }
+    }
+  },
+  "aggs": {
+    "orders_per_weekday": {
+      "terms": { "field": "day_of_week_num" }
+    }
+  }
+}
+```
+
+<hr>
+
+:question: Using the `shakespeare` index, run a search that returns each line's length in characters as a field called `line_length`, and only returns lines longer than 100 characters spoken by `HAMLET`.
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+```json
+GET shakespeare/_search
+{
+  "runtime_mappings": {
+    "line_length": {
+      "type": "long",
+      "script": {
+        "source": "emit(doc['text_entry.keyword'].value.length())"
+      }
+    }
+  },
+  "query": {
+    "bool": {
+      "filter": [
+        { "term":  { "speaker": "HAMLET" } },
+        { "range": { "line_length": { "gt": 100 } } }
+      ]
+    }
+  },
+  "fields": ["line_length", "text_entry"],
+  "_source": false,
+  "size": 5
+}
+```
+
+:bulb: Notes that catch people out:
+- `doc['field']` needs **doc values**, so use the `keyword` sub-field for text, not the analysed `text` field.
+- If a document might be missing the field, guard it or the script throws:
+  `"source": "if (doc['text_entry.keyword'].size() != 0) { emit(doc['text_entry.keyword'].value.length()) }"`
+- You can also `sort` on a runtime field, exactly like a normal one.
+</details>
+<hr>
+
+:question: Search the `shakespeare` index for a runtime field `speaker_first_word` (the first word of the speaker's name) and aggregate the top 5 values.
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+```json
+GET shakespeare/_search?filter_path=aggregations
+{
+  "size": 0,
+  "runtime_mappings": {
+    "speaker_first_word": {
+      "type": "keyword",
+      "script": {
+        "source": """
+          if (doc['speaker'].size() == 0) { return; }
+          String s = doc['speaker'].value;
+          int i = s.indexOf(' ');
+          emit(i == -1 ? s : s.substring(0, i));
+        """
+      }
+    }
+  },
+  "aggs": {
+    "top_first_words": {
+      "terms": { "field": "speaker_first_word", "size": 5 }
+    }
+  }
+}
+```
+</details>
+<hr>
+
+## Searching a runtime field defined in the mapping
+
+If the field is already in the index mapping's `runtime` section, you search it like any other field — no `runtime_mappings` block needed:
+
+```json
+GET my-index/_search
+{
+  "query": { "range": { "day_of_week_num": { "gte": 6 } } },
+  "fields": ["day_of_week_num"]
+}
+```
+
+:bulb: A `runtime_mappings` definition in the search request **overrides** a same-named runtime field in the mapping for that request only. That is a nice way to demonstrate "search with a different definition without changing the index".
+
+## See which runtime fields exist
+
+```json
+GET my-index/_mapping/field/*?include_defaults=false
+GET my-index/_field_caps?fields=*
+```
+Runtime fields show up in `_field_caps` with `"metadata_field": false` and are marked as searchable and aggregatable.

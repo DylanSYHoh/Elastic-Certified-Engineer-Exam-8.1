@@ -1,5 +1,16 @@
-# Cluster Management
+# Cluster Management (8.15)
 
+**8.15 objectives covered here:**
+1. Diagnose shard issues and repair a cluster's health
+2. Backup and restore a cluster and/or specific indices
+3. Configure a snapshot to be searchable
+4. Configure a cluster for cross-cluster search
+5. Implement cross-cluster replication
+6. Automate snapshots with Snapshot Lifecycle Management :sparkles: *(new since 8.1)*
+
+> :books: "Define role-based access control using Elasticsearch Security" is not a listed objective; it stays at the bottom as bonus material.
+
+---
 
 # Diagnose shard issues and repair a cluster's health
 
@@ -32,7 +43,7 @@ PUT broken_index/_doc/1
 
 <details>
   <summary>View Solution (click to reveal)</summary>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/cluster-health.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/cluster-health.html
 
 ```json
 GET _cluster/health
@@ -59,7 +70,7 @@ GET _cluster/health
 ```
 
 ## Or
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/cat-health.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/cat-health.html
 ```json
 GET _cat/health?v
 
@@ -78,7 +89,7 @@ index health usually matches the cluster health
 
 <details>
   <summary>View Solution (click to reveal)</summary>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/cat-indices.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/cat-indices.html
 
 > **Query Parameters**
 > **health**
@@ -99,38 +110,68 @@ yellow open broken_index               xHfY0EcGRq-RRZv_cQONCw 2 2      1 0     4
 </details>
 <hr>
 
+## :sparkles: The Health API — start here in 8.15
+
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/health-api.html
+
+Added in 8.7 and **the fastest route to a diagnosis** on a modern cluster: it does not just tell you the status, it tells you the *cause* and gives you the remediation steps and the doc link.
+
+```json
+GET _health_report
+
+// drill into just one indicator
+GET _health_report/shards_availability
+GET _health_report/disk
+GET _health_report/ilm
+```
+
+Indicators it reports on: `master_is_stable`, `repository_integrity`, `disk`, `shards_capacity`, `shards_availability`, `data_stream_lifecycle`, `ilm`, `slm`.
+
+Each unhealthy indicator returns a `diagnosis` array containing `cause`, `action`, `help_url`, and the affected resources. If a task says "diagnose and repair", run this first, then confirm with `_cluster/allocation/explain`.
+
+<hr>
+
 :question: Diagnose the fault in index `broken_index`
 
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-Explain the index health
+Explain the allocation of a specific shard.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/cluster-allocation-explain.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/cluster-allocation-explain.html
+
+:warning: You must specify `index`, `shard` **and** `primary` — otherwise you get
+`Validation Failed: 1: shard must be specified;2: primary must be specified;`
 
 ```json
 GET _cluster/allocation/explain
 {
-  "index": "broken_index"
+  "index": "broken_index",
+  "shard": 0,
+  "primary": false
 }
-
-// output
-
-{
-  "error" : {
-    "root_cause" : [
-      {
-        "type" : "action_request_validation_exception",
-        "reason" : "Validation Failed: 1: shard must be specified;2: primary must be specified;"
-      }
-    ],
-    "type" : "action_request_validation_exception",
-    "reason" : "Validation Failed: 1: shard must be specified;2: primary must be specified;"
-  },
-  "status" : 400
-}
-
 ```
+
+:bulb: With an empty body, Elasticsearch picks an arbitrary unassigned shard for you — which is usually exactly what you want:
+
+```json
+GET _cluster/allocation/explain
+```
+
+Read these fields in the response:
+- `unassigned_info.reason` — `INDEX_CREATED`, `ALLOCATION_FAILED`, `NODE_LEFT`, `CLUSTER_RECOVERED`…
+- `can_allocate` — `no`, `yes`, `throttled`, `awaiting_info`
+- `allocate_explanation` — plain English
+- `node_allocation_decisions[].deciders[]` — **the actual reason each node refused the shard**
+
+Common decider messages and their fix:
+
+| Decider says | Real cause | Fix |
+| --- | --- | --- |
+| `the shard cannot be allocated to the same node on which a copy of the shard already exists` | more replicas than nodes | reduce `number_of_replicas` or add a node |
+| `the node is above the high watermark cluster setting [...disk.watermark.high]` | disk full | free space, or raise the watermark |
+| `node does not match index setting [index.routing.allocation...]` | tier/attribute filter cannot be satisfied | fix the routing setting, or add a node with that role |
+| `shard has exceeded the maximum number of retries [5]` | repeated allocation failure | fix the root cause, then `POST _cluster/reroute?retry_failed=true` |
 </details>
 <hr>
 
@@ -139,7 +180,7 @@ GET _cluster/allocation/explain
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/cat-shards.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/cat-shards.html
 
 ```json
 
@@ -161,7 +202,7 @@ Here we can see that a shard is `UNASSIGNED`.
 
 Why is that?
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/cluster-allocation-explain.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/cluster-allocation-explain.html
 
 A lot of information is presented here, if you have a larger underlying issue you will see many explanations across many indices.  Try to keep that in mind.
 
@@ -203,12 +244,68 @@ green  open   broken_index xHfY0EcGRq-RRZv_cQONCw   2   0          1            
 
 ```
 
-</details>
+## The repair toolbox
+
+What the colours mean:
+
+| Status | Meaning |
+| --- | --- |
+| **green** | all primaries and all replicas assigned |
+| **yellow** | all primaries assigned, at least one **replica** unassigned — *data is intact, availability is reduced* |
+| **red** | at least one **primary** unassigned — *data is unavailable* |
+
+:bulb: A single-node cluster with `number_of_replicas > 0` is **permanently yellow**, by design. On the exam, "make the cluster green" on a one-node cluster almost always means "set replicas to 0".
+
+```json
+// yellow: too many replicas for the number of nodes
+PUT /broken_index/_settings
+{ "number_of_replicas": 0 }
+
+// apply to every index at once
+PUT /*/_settings
+{ "index.number_of_replicas": 0 }
+
+// shard failed 5 times and gave up - fix the cause, then:
+POST _cluster/reroute?retry_failed=true
+
+// find which indices are the problem
+GET _cat/indices?v&health=red&h=index,health,status,pri,rep,docs.count
+GET _cat/shards?v&h=index,shard,prirep,state,unassigned.reason,node&s=state
+
+// disk watermarks - the #1 real-world cause of unassigned shards
+GET _cat/allocation?v
+GET _cluster/settings?include_defaults=true&flat_settings&filter_path=**.disk.watermark*
+
+PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.disk.watermark.low":  "85%",
+    "cluster.routing.allocation.disk.watermark.high": "90%",
+    "cluster.routing.allocation.disk.watermark.flood_stage": "95%"
+  }
+}
+
+// flood stage puts indices into read-only-allow-delete; clear the block after freeing space
+PUT /*/_settings
+{ "index.blocks.read_only_allow_delete": null }
+
+// is allocation switched off entirely?
+PUT _cluster/settings
+{ "persistent": { "cluster.routing.allocation.enable": "all" } }
+
+// pending tasks / hot threads when the cluster is just slow
+GET _cluster/pending_tasks
+GET _nodes/hot_threads
+GET _cat/nodes?v&h=name,node.role,heap.percent,ram.percent,cpu,disk.avail
+```
+
+:warning: Last resort only, and it **loses data**: `POST _cluster/reroute` with `allocate_empty_primary` / `allocate_stale_primary` and `"accept_data_loss": true`. Know it exists; do not reach for it before the health API and allocation explain.
+
 <hr>
 
 # Backup and restore a cluster and/or specific indices
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshots-take-snapshot.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-take-snapshot.html
 
 > You cannot back up an Elasticsearch cluster by simply taking a copy of the data directories of all of its nodes. 
 > 
@@ -232,41 +329,56 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshots-take-snaps
 ### Version Compatibility
 > Version compatibility refers to the underlying Lucene index compatibility. Follow the Upgrade documentation when migrating between versions.
 >
-> A snapshot contains a copy of the on-disk data structures that make up an index. This means that snapshots can only be restored to versions of Elasticsearch that can read the indices:
+> A snapshot contains a copy of the on-disk data structures that make up an index. This means that snapshots can only be restored to versions of Elasticsearch that can read the indices.
 
-- A snapshot of an index created in 6.x can be restored to 7.x.
-- A snapshot of an index created in 5.x can be restored to 6.x.
-- A snapshot of an index created in 2.x can be restored to 5.x.
-- A snapshot of an index created in 1.x can be restored to 2.x.
+The rule to remember: **a snapshot can be restored to the same major version, or to the next major version — one hop only.**
 
+- An index created in 7.x can be restored into 8.x. :white_check_mark:
+- An index created in 6.x **cannot** be restored directly into 8.x. :x: (You must reindex it in 7.x first, or use an archive index.)
+- You cannot restore a snapshot taken by a *newer* Elasticsearch into an older one at all.
 
 ### Repositories
+
 > You must register a snapshot repository before you can perform snapshot and restore operations. We recommend creating a new snapshot repository for each major version. The valid repository settings depend on the repository type.
+
+| Type | Notes |
+| --- | --- |
+| `fs` | shared filesystem — needs `path.repo` in `elasticsearch.yml` on **every** node, and the path must be identical everywhere |
+| `s3`, `gcs`, `azure` | need the corresponding repository plugin (bundled in 8.x) plus credentials in the keystore |
+| `url` | read-only, over http/https/file/ftp |
+| `source` | stores only `_source` — smaller, but needs a reindex to restore |
+
+```json
+GET _snapshot                                    // all registered repositories
+POST _snapshot/my_test_backup/_verify            // can every node actually reach it?
+POST _snapshot/my_test_backup/_cleanup           // remove orphaned data
+GET _snapshot/my_test_backup/_status             // in-progress snapshot progress
+```
 
 
 :question: Backup and restore an index using `snapshots` <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/modules-snapshots.html (references other documentation)  <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshot-restore.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshots-register-repository.html#self-managed-repo-types <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/restore-snapshot-api.html#restore-snapshot-api-index-settings <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/modules-snapshots.html (references other documentation)  <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshot-restore.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-register-repository.html#self-managed-repo-types <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/restore-snapshot-api.html#restore-snapshot-api-index-settings <br>
 
 1. :question: Backup the `shakespeare` index to a snapshot called `shakespeare_snapshot_<current_date>`
 
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshot-restore.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshot-restore.html
 
 You will need to make sure that the `path.repo` setting has been applied to each ElasticSearch node before doing this.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshots-register-repository.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-register-repository.html
 
 The docker images in this Git Repository have this set in the `1es-1kb-xpackSec.yml` single node cluster.  Which was used predominantly throughout the other sections.
 
 Normally you would save the snapshots to share storage like NFS, AWS S3 etc.   In this demo we use the local filesystem `/tmp` this is not recommended in production.
 
 
-This can all be done in the kibana GUI https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshot-restore.html
+This can all be done in the kibana GUI https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshot-restore.html
 
 ## Check that path.repo is set
 
@@ -315,7 +427,7 @@ Notice that `/tmp` needed to be available and that you can then append a path to
 
 Date math requires the snapshot name to be enclosed in angled brackets '<>' that is: '%3C' '%3E'
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/api-conventions.html#api-date-math-index-names
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/api-conventions.html#api-date-math-index-names
   > You must enclose date math names in angle brackets. If you use the name in a request path, `special characters must be URI encoded.`
 
 ```json
@@ -412,7 +524,7 @@ yellow open   restored_index_shakespeare gKIdyU4jSnqmuBLRqPpZLw   1   1     1113
 
 3. :closed_book: Backup/Restore the cluster configuration
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshots-take-snapshot.html#back-up-config-files
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-take-snapshot.html#back-up-config-files
 > We recommend that you take regular (ideally, daily) backups of your Elasticsearch config ($ES_PATH_CONF) directory using the file backup software of your choice.
 
 Normally `/etc/elasticsearch`
@@ -429,9 +541,9 @@ So, it's a probably good idea to backup your `/etc/elasticsearch/` folder and ru
 
 4. :closed_book: Backup/Restore the Security configuration
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/security-backup.html (just a reference to the following 2 links)
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshots-take-snapshot.html#back-up-config-files
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/snapshots-take-snapshot.html#cluster-state-snapshots  
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/security-backup.html (just a reference to the following 2 links)
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-take-snapshot.html#back-up-config-files
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-take-snapshot.html#cluster-state-snapshots  
 ## Back up file-based security configuration
 > Elasticsearch security features are configured using the xpack.security namespace inside the elasticsearch.yml and elasticsearch.keystore files. In addition there are several other extra configuration files inside the same ES_PATH_CONF directory. These files define roles and role mappings and configure the file realm. 
 
@@ -460,19 +572,208 @@ snapshot the `.security` index alias.
 
 ## Restore the Security index
 
-See https://www.elastic.co/guide/en/elasticsearch/reference/7.13/restore-security-configuration.html
+See https://www.elastic.co/guide/en/elasticsearch/reference/8.15/restore-security-configuration.html
 
+## Restore options worth knowing
 
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/restore-snapshot-api.html
 
+```json
+POST /_snapshot/my_test_backup/my-snapshot/_restore
+{
+  "indices": "shakespeare,accounts-*",
+  "ignore_unavailable": true,
+  "include_global_state": false,
+  "rename_pattern": "(.+)",
+  "rename_replacement": "restored_index_$1",
+  "include_aliases": false,
+  "index_settings": {
+    "index.number_of_replicas": 0,
+    "index.blocks.read_only": false
+  },
+  "ignore_index_settings": [ "index.refresh_interval" ]
+}
+```
+
+:warning: **You cannot restore over an open index of the same name.** If a task says "restore `shakespeare` back over itself", you must first either:
+```json
+POST shakespeare/_close      // then restore, then _open
+// or
+DELETE shakespeare           // then restore
+```
+Restoring into a *renamed* index (as above) sidesteps this entirely and is usually the safer exam answer.
+
+Monitor a restore in progress:
+```json
+GET _cat/recovery?v&active_only=true
+GET _cluster/health?wait_for_status=green&timeout=60s
+```
+
+Other snapshot housekeeping:
+```json
+GET _snapshot/my_test_backup/my-snapshot                 // details of one snapshot
+GET _snapshot/my_test_backup/_current                    // what's running right now
+DELETE _snapshot/my_test_backup/my-snapshot              // delete a snapshot (also cancels if running)
+DELETE _snapshot/my_test_backup                          // unregister the repository (does NOT delete data)
+```
+
+---
+
+# :sparkles: Automate snapshots with Snapshot Lifecycle Management (SLM)
+
+**New objective in 8.15** — it was not on the 8.1 list, so make sure you can do this cold.
+
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-take-snapshot.html#automate-snapshots-slm <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/slm-api-put-policy.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/getting-started-snapshot-lifecycle-management.html
+
+> SLM lets you automatically take snapshots at a set schedule and automatically delete them when they age out, so you don't have to script it yourself.
+
+## Prerequisites
+
+1. A **registered repository** (SLM cannot create one for you).
+2. The `manage_slm` cluster privilege, plus `manage` on the indices you snapshot. (The built-in `slm-history-ilm-policy` handles the audit trail.)
+
+## The anatomy of a policy
+
+```json
+PUT _slm/policy/<policy_id>
+{
+  "schedule":   "<cron expression>",
+  "name":       "<snapshot name, supports date math>",
+  "repository": "<registered repository>",
+  "config":     { ...same body as the snapshot API... },
+  "retention":  { ... }
+}
+```
+
+| Field | Notes |
+| --- | --- |
+| `schedule` | **Cron with seconds**: `<sec> <min> <hour> <day-of-month> <month> <day-of-week> [year]`. `0 30 1 * * ?` = 01:30 UTC daily. (8.15 also accepts a simple time-unit interval like `"1d"`.) |
+| `name` | Date math, URL-encoding **not** needed here because it's in the body: `<nightly-snap-{now/d}>`. A UUID is appended automatically so names never clash. |
+| `repository` | must already exist |
+| `config.indices` | array or pattern, e.g. `["*"]` or `["logs-*", "-logs-debug*"]` |
+| `config.include_global_state` | `true` to include cluster settings, templates, ILM/SLM policies, and (with `feature_states`) the security index |
+| `config.feature_states` | e.g. `["security", "kibana"]`, or `["none"]` |
+| `config.partial` | `true` = snapshot succeeds even if some shards are unavailable |
+| `retention.expire_after` | delete snapshots older than this |
+| `retention.min_count` | never go below this many, even if expired |
+| `retention.max_count` | never keep more than this many, even if not expired |
+
+:warning: `retention` is only enforced by the **retention task**, which runs on its own schedule (`slm.retention_schedule`, default `0 30 1 * * ?` — 01:30 UTC daily), *not* at snapshot time.
+
+<hr>
+
+:question: Register a repository and create an SLM policy called `nightly-snapshots` that snapshots **all** indices plus the cluster state to it every day at 01:30 UTC, names snapshots `nightly-snap-<date>`, and keeps snapshots for 30 days, never fewer than 5 and never more than 50.
+
+<details>
+  <summary>View Solution (click to reveal)</summary>
+
+### 1. Register the repository (if it doesn't exist)
+
+```json
+PUT _snapshot/my_repository
+{
+  "type": "fs",
+  "settings": {
+    "location": "/tmp/my_repository",
+    "compress": true
+  }
+}
+
+POST _snapshot/my_repository/_verify
+```
+
+### 2. Create the policy
+
+```json
+PUT _slm/policy/nightly-snapshots
+{
+  "schedule": "0 30 1 * * ?",
+  "name": "<nightly-snap-{now/d}>",
+  "repository": "my_repository",
+  "config": {
+    "indices": ["*"],
+    "include_global_state": true
+  },
+  "retention": {
+    "expire_after": "30d",
+    "min_count": 5,
+    "max_count": 50
+  }
+}
+```
+
+### 3. Don't wait 24 hours — run it now
+
+```json
+POST _slm/policy/nightly-snapshots/_execute
+
+// output
+{ "snapshot_name": "nightly-snap-2026.08.14-abc123def456ghi789jkl" }
+```
+
+### 4. Verify
+
+```json
+GET _slm/policy/nightly-snapshots
+
+// look for:
+//   "next_execution"          - when it will next fire
+//   "last_success.snapshot_name"
+//   "last_failure"
+//   "stats.snapshots_taken"
+
+GET _snapshot/my_repository/_all?verbose=false
+GET _cat/snapshots/my_repository?v
+```
+</details>
+<hr>
+
+## Cron quick reference (SLM cron has a **seconds** field — this trips people up)
+
+| Expression | Fires |
+| --- | --- |
+| `0 30 1 * * ?` | every day at 01:30:00 |
+| `0 0 */6 * * ?` | every 6 hours, on the hour |
+| `0 15 2 ? * MON` | every Monday at 02:15 |
+| `0 0 0 1 * ?` | first day of every month at midnight |
+| `0 0/30 * * * ?` | every 30 minutes |
+
+:bulb: `?` means "no specific value" and is required in **exactly one** of day-of-month / day-of-week — you cannot put `*` in both.
+
+## The rest of the SLM API
+
+```json
+GET _slm/policy                                  // all policies + stats
+GET _slm/policy/nightly-snapshots                // one policy
+DELETE _slm/policy/nightly-snapshots             // delete the policy (NOT its snapshots)
+
+POST _slm/policy/nightly-snapshots/_execute      // run now
+POST _slm/_execute_retention                     // apply retention rules now
+
+GET _slm/stats                                   // taken/failed/deleted counters
+GET _slm/status                                  // RUNNING or STOPPED
+POST _slm/stop                                   // pause SLM (e.g. before an upgrade)
+POST _slm/start
+```
+
+:warning: Exam traps:
+- Deleting an SLM policy does **not** delete the snapshots it already took.
+- If `GET _slm/policy/x` shows `last_failure` with `repository_missing_exception`, you created the policy before the repository.
+- SLM policies are part of cluster state, so `include_global_state: true` in a snapshot backs up your SLM policies too.
+- `_health_report` has an `slm` indicator — use it if a task says "SLM is not working, fix it".
+
+---
 
 
 # Configure a snapshot to be searchable
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/searchable-snapshots.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/searchable-snapshots.html
 > Searchable snapshots let you use snapshots to search infrequently accessed and read-only data in a very cost-effective fashion. The cold and frozen data tiers use searchable snapshots to reduce your storage and operating costs.
 > 
 > Searchable snapshots eliminate the need for replica shards, potentially halving the local storage needed to search your data. Searchable snapshots rely on the same snapshot mechanism you already use for backups and have minimal impact on your snapshot repository storage costs.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ilm-searchable-snapshot.html  <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ilm-searchable-snapshot.html  <br>
 Well worth watching: https://www.youtube.com/watch?v=nN6JNP9i3qQ
 
 :question:  Create a searchable snapshot of the Kibana eCommerce data.
@@ -526,7 +827,7 @@ GET _snapshot/my_snapshots/ecomm*
 
 This is the Pièce de résistance - the snapshot is `mounted` in local shared cache.
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/searchable-snapshots-api-mount-snapshot.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/searchable-snapshots-api-mount-snapshot.html
 ```json
 POST _snapshot/my_snapshots/ecomm-snapshot-2021.10.07/_mount?storage=shared_cache
 {
@@ -553,7 +854,7 @@ GET mounted-ecomm/_search
 ```
 
 ## clean up
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/searchable-snapshots-api-clear-cache.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/searchable-snapshots-api-clear-cache.html
 clear the cache
 ```json
 POST /mounted-ecomm/_searchable_snapshots/cache/clear
@@ -571,7 +872,25 @@ DELETE mounted-ecomm
 
 
 # Configure a cluster for cross cluster search
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/modules-cross-cluster-search.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/modules-cross-cluster-search.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/remote-clusters.html
+
+:bulb: Writing the actual cross-cluster *query* is a Searching Data objective — see [Searching_Data.md](Searching_Data.md). This objective is the **configuration**.
+
+## Two security models in 8.15
+
+| Model | Notes |
+| --- | --- |
+| **API key based** (added 8.14, the recommended one) | You create a cross-cluster API key on the *remote*, store it in the local cluster's keystore under `cluster.remote.<alias>.credentials`, and the remote grants fine-grained access. Requires the remote cluster to have `remote_cluster_server.enabled: true` (port **9443** by default). |
+| **Certificate based** (the classic one) | Mutual TLS on the transport port (**9300**). The local user's *role names* are sent to the remote, which must have identically-named roles. Simpler, but a superuser on one side is a superuser on the other. |
+
+## Two connection modes
+
+| Mode | Setting | Use when |
+| --- | --- | --- |
+| `sniff` (default) | `cluster.remote.<alias>.seeds` | you can reach the remote nodes' publish addresses directly |
+| `proxy` | `cluster.remote.<alias>.mode: proxy` + `.proxy_address` | the remote sits behind a load balancer / TCP proxy (this is what Elastic Cloud uses) |
+
 ## Update the cluster settings with the seed node of each remote cluster
 
 ```json
@@ -670,8 +989,57 @@ GET /twitter,cluster_one:twitter,cluster_two:twitter/_search
 ```
 Here we search the local cluster and two remote clusters.
 
+## Verify the configuration
+
+These three are the "prove it works" commands for this objective:
+
+```json
+// which remotes are registered, are they connected, how many nodes?
+GET _remote/info
+
+// which clusters and indices does a pattern actually resolve to, and are they up? (8.13+)
+GET _resolve/cluster/*:kibana_sample_data_*
+
+// read back the settings you applied
+GET _cluster/settings?filter_path=persistent.cluster.remote
+```
+
+## Per-remote settings you may be asked for
+
+```json
+PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.remote.cluster_one.seeds": ["10.0.0.1:9300"],
+    "cluster.remote.cluster_one.skip_unavailable": true,       // don't fail the whole search if it's down
+    "cluster.remote.cluster_one.transport.compress": true,
+    "cluster.remote.cluster_one.node_connections": 3           // sniff mode only
+  }
+}
+```
+
+Proxy mode instead of sniff:
+```json
+PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.remote.cluster_two.mode": "proxy",
+    "cluster.remote.cluster_two.proxy_address": "proxy.example.com:9400",
+    "cluster.remote.cluster_two.proxy_socket_connections": 18
+  }
+}
+```
+
+Remove a remote by setting it to `null`:
+```json
+PUT _cluster/settings
+{ "persistent": { "cluster.remote.cluster_one.seeds": null } }
+```
+
+:warning: The node doing the cross-cluster work needs the **`remote_cluster_client`** role. On a default node with all roles this is already true, but on a cluster with dedicated node roles it is a very common cause of "remote cluster is not connected".
+
 # Implement cross-cluster replication
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/xpack-ccr.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/xpack-ccr.html
 > With cross-cluster replication, you can replicate indices across clusters to:
 >
 > - Continue handling search requests in the event of a datacenter outage
@@ -681,9 +1049,67 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.1/xpack-ccr.html
 > Cross-cluster replication uses an active-passive model. You index to a leader index, and the data is replicated to one or more read-only follower indices. Before you can add a follower index to a cluster, you must configure the remote cluster that contains the leader index.
 
 This is a heavily involved process - follow this link - with the guidelines below <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ccr-getting-started.html (reference to the following) <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/ccr-getting-started-tutorial.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/remote-clusters-connect.html   <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ccr-getting-started.html (reference to the following) <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ccr-getting-started-tutorial.html <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/remote-clusters-connect.html   <br>
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/ccr-apis.html <br>
+
+## :warning: Do this with the API, not just the GUI
+
+The walkthrough below is Kibana-driven, which is fine for understanding it — but **the exam is done in Dev Tools**, and this is the section people most often only ever practise in the UI. Learn these calls:
+
+```json
+// 0. PREREQUISITES (on the FOLLOWER cluster)
+//    - a platinum/enterprise licence or a 30-day trial
+//    - the leader registered as a remote cluster
+PUT _cluster/settings
+{ "persistent": { "cluster.remote.leader-cluster.seeds": ["esnode-east:9300"] } }
+
+GET _remote/info
+
+// 1. FOLLOW A SINGLE INDEX  (run on the FOLLOWER)
+PUT /follower-my-index/_ccr/follow?wait_for_active_shards=1
+{
+  "remote_cluster": "leader-cluster",
+  "leader_index": "my-index"
+}
+
+// 2. CHECK IT
+GET /follower-my-index/_ccr/stats     // per-index: leader/follower global checkpoints, lag, read exceptions
+GET /_ccr/stats                       // cluster-wide, plus auto-follow stats
+GET /follower-my-index/_ccr/info      // status: active | paused
+
+// 3. AUTO-FOLLOW PATTERN  (run on the FOLLOWER) - replicates any NEW index matching the pattern
+PUT /_ccr/auto_follow/east-auto-follow
+{
+  "remote_cluster": "leader-cluster",
+  "leader_index_patterns": ["test-ccr-index-*"],
+  "leader_index_exclusion_patterns": ["test-ccr-index-ignore-*"],
+  "follow_index_pattern": "follower-{{leader_index}}"
+}
+
+GET /_ccr/auto_follow/east-auto-follow
+DELETE /_ccr/auto_follow/east-auto-follow
+
+// 4. LIFECYCLE OF A FOLLOWER INDEX
+POST /follower-my-index/_ccr/pause_follow
+POST /follower-my-index/_ccr/resume_follow
+{ "max_read_request_operation_count": 5120 }
+
+// converting a follower into a normal writeable index is a THREE step dance:
+POST /follower-my-index/_ccr/pause_follow
+POST /follower-my-index/_close
+POST /follower-my-index/_ccr/unfollow
+POST /follower-my-index/_open
+```
+
+:warning: Things the exam will punish:
+- A follower index is **read-only**. You cannot index into it — writes must go to the leader.
+- The leader index must have **soft deletes enabled** (`index.soft_deletes.enabled`, default `true` in 7.x+ and not configurable in 8.x, so this is mostly a "know why it matters" point).
+- CCR needs a **platinum/enterprise licence** — start a 30-day trial in a lab: `POST /_license/start_trial?acknowledge=true`
+- Both clusters need the `remote_cluster_client` node role on the coordinating nodes.
+- `follow_index_pattern` uses `{{leader_index}}` — double braces, mustache style.
+
 :question: Replicate `kibana_sample_data_ecommerce` from the `east` cluster to the `west cluster`
 
 <details>
@@ -824,14 +1250,15 @@ GET follower-test-ccr-index-000000/_search
 
 </details>
 <hr>
-# Bonus below! Not part of the 8.1 exam topics!
-# Define role-based access control using Elasticsearch Security
+---
+---
+
+# :books: BONUS — not part of the 8.15 exam objectives
+# (Bonus) Define role-based access control using Elasticsearch Security
 
 >  :warning: :warning: :warning: IMPORTANT NOTE: from here on it is assumed you have a working kibana node to work from the "development console" and that you have imported the sample data.
 
-> See: [Running test servers on docker](Test_servers_on_docker.md)
-
-> See: [Importing Sample data](Importing_sample_data.md)
+> For cluster setup, see [Part 0 of example.md](example.md). For the Kibana sample data sets used below, add them from **Kibana → Home → Try sample data**.
 
 :question: To do this section you need to:
 
@@ -869,8 +1296,7 @@ Error message:
 
 ## Create a role
 
-:warning: This assumes you have ingested the Elastic sample data.
-> See: [Importing Sample data](Importing_sample_data.md)
+:warning: This assumes you have ingested the Kibana sample flight data (**Kibana → Home → Try sample data → Sample flight data**).
 
 ### :question:  Create role and user for the following:
 
@@ -882,8 +1308,8 @@ Error message:
 <details>
   <summary>View Solution (click to reveal)</summary>
 
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/built-in-roles.html
-https://www.elastic.co/guide/en/elasticsearch/reference/8.1/security-privileges.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/built-in-roles.html
+https://www.elastic.co/guide/en/elasticsearch/reference/8.15/security-privileges.html
 
 ```json
 PUT _security/role/flights_all

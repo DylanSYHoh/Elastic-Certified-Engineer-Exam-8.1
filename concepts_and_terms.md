@@ -1,5 +1,52 @@
 # Attempts to provide some clarity on concepts and terms that are found on the exam.
-This isn't in any particular order
+This isn't in any particular order. Aligned to the **8.15** objectives.
+
+## :sparkles: Runtime Field
+A field that is **evaluated at query time** rather than at index time. It is defined by a Painless script that calls `emit(...)`, it consumes no index space, and it can be added to or removed from an existing index instantly — no reindex required.
+
+Three places to define one: in the index mapping at creation, added to an existing mapping (`PUT idx/_mapping` with a `runtime` block), or inline in a single search request under `runtime_mappings`.
+
+:warning: A runtime field is **never** in `_source`. Retrieve it with the `fields` parameter of the search request. Related: `"dynamic": "runtime"` maps *unknown* fields as runtime fields instead of indexing them.
+
+## :sparkles: Snapshot Lifecycle Management (SLM)
+Automates taking and deleting snapshots on a schedule, so you don't have to script `PUT _snapshot/repo/snap` in cron. A policy has a `schedule` (cron, **with a seconds field**), a `name` (supports date math), a `repository` (which must already exist), a `config` (the same body you would send to the snapshot API), and optional `retention` rules (`expire_after`, `min_count`, `max_count`).
+
+Retention is applied by a separate periodic task, not at snapshot time. `POST _slm/policy/<id>/_execute` runs a policy immediately, which is how you test one without waiting for the schedule.
+
+## Painless
+Elasticsearch's built-in scripting language — a safe, sandboxed, Java-like syntax. Where it shows up on the exam:
+
+| Context | You write to | Notes |
+| --- | --- | --- |
+| Runtime field | `emit(value)` | reads via `doc['f'].value` or `params._source['f']` |
+| Ingest pipeline `script` processor | `ctx.field` | note: **no** `_source` |
+| `_update` / `_update_by_query` / `_reindex` script | `ctx._source.field` | note: **with** `_source` |
+| Script query / script sort | `return value` | reads via `doc['f'].value` |
+
+The `ctx` vs `ctx._source` distinction is the single most common silent mistake in this material.
+
+## Component Template vs Index Template
+A **component template** is a reusable fragment of settings/mappings/aliases. It does nothing on its own.
+
+A **composable index template** (`PUT _index_template/...`) is what actually matches an index pattern. It can pull in component templates via `composed_of`, and its own inline `template` block overrides them.
+
+When several index templates match the same new index, the highest `priority` wins **outright** — they are not merged with each other. Component templates listed in `composed_of` *are* merged, in array order.
+
+:warning: The legacy `PUT _template/...` API is deprecated in 8.x and removed in 9.x. Use `_index_template`.
+
+## Data Tiers
+`data_content`, `data_hot`, `data_warm`, `data_cold`, `data_frozen` — node roles that ILM's `migrate` action moves indices between as they age. The frozen tier is where searchable snapshots with `shared_cache` storage live.
+
+## Point In Time (PIT)
+A lightweight, named view of the index state at a moment in time (`POST /idx/_pit?keep_alive=5m`). Combined with `search_after`, it is the modern replacement for `scroll` when you need to page past 10,000 results consistently. It also unlocks the `_shard_doc` tiebreaker sort field.
+
+## Searchable Snapshot
+A snapshot that has been **mounted** as a searchable index rather than fully restored. Storage is either `full_copy` (cold tier — a local copy, no replicas needed) or `shared_cache` (frozen tier — only a partial cache locally, data fetched from the repository on demand). Cuts storage cost dramatically for read-only data.
+
+## Health API (`GET _health_report`)
+Added in 8.7. Rather than just a green/yellow/red status, it returns per-indicator diagnoses (`shards_availability`, `disk`, `ilm`, `slm`, `master_is_stable`, …) with the **cause**, a suggested **action**, and a doc link. For the "diagnose shard issues" objective, run this before `_cluster/allocation/explain`.
+
+
 
 ## Sub-Aggregations
 These allow you to embed aggregations inside other aggregations.<br>
@@ -59,8 +106,16 @@ An index alias is a secondary name for one or more indices. Most Elasticsearch A
 <br>
 You can change the data streams or indices of an alias at any time. If you use aliases in your application’s Elasticsearch requests, you can reindex data with no downtime or changes to your app’s code.
 
+## Pagination methods, compared
+| Method | Good for | Ceiling |
+| --- | --- | --- |
+| `from` + `size` | page-numbered UIs | `from + size` ≤ `index.max_result_window` (10,000) |
+| `search_after` + PIT | deep paging, exporting everything | none; needs a unique tiebreaker sort |
+| `scroll` | legacy bulk export | deprecated in 8.x |
+| composite agg + `after_key` | paging **buckets**, not documents | n/a |
+
 ## Search Templates
-A search template is a stored search you can run with different variables.
+A search template is a stored search you can run with different variables. *(No longer an 8.15 objective.)*
 
 ## Term Query
 Query the data based upon a term. 
