@@ -1,0 +1,18 @@
+{
+    "name": "elk-stack-8-15",
+    "version": "1.0.0",
+    "description": "Docker Compose setup for running the ELK (Elasticsearch, Logstash, Kibana) stack v8.15",
+    "private": true,
+    "packageManager": "pnpm@9.7.0",
+    "scripts": {
+        "elk:up": "docker compose up -d",
+        "elk:down": "docker compose down",
+        "elk:down:clean": "docker compose down -v",
+        "elk:logs": "docker compose logs -f",
+        "elk:status": "docker compose ps",
+        "elk:restart": "docker compose restart"
+    },
+    "engines": {
+        "node": ">=16"
+    }
+}
