@@ -369,58 +369,104 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.15/restore-snapshot-ap
 
 https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshot-restore.html
 
-You will need to make sure that the `path.repo` setting has been applied to each ElasticSearch node before doing this.
+### :warning: `path.repo` is the step everyone misses
+
+Mounting a directory into the container is **not enough**. Elasticsearch refuses to register an `fs` repository at any path not listed in `path.repo`, and the error reads like the directory is missing:
+
+```
+repository_verification_exception
+[my_backup] location [/mount/backups] doesn't match any of the locations
+specified by path.repo because this setting is empty
+```
+
+The `docker-compose.yml` in this repo is already configured correctly:
+
+```yaml
+services:
+  elasticsearch:
+    environment:
+      - path.repo=/mount/backups     # <-- without this, nothing else works
+    volumes:
+      - ./backups:/mount/backups     # host dir -> container path
+```
+
+Three things all have to be true, and they fail one after the other if you fix them one at a time:
+
+| Requirement | Symptom if missing |
+| --- | --- |
+| The host directory exists **before** the container starts | Docker auto-creates it as `root`, then Elasticsearch cannot write to it |
+| The volume is mounted into the container | `/mount/backups` does not exist inside → "directory not found" |
+| `path.repo` names that container path | `doesn't match any of the locations specified by path.repo` |
+
+:warning: **Editing `docker-compose.yml` does not change a running container.** You must recreate it, or the mount and the setting are simply absent:
+```bash
+mkdir -p backups
+docker compose up -d elasticsearch
+```
 
 https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshots-register-repository.html
 
-The docker images in this Git Repository have this set in the `1es-1kb-xpackSec.yml` single node cluster.  Which was used predominantly throughout the other sections.
+Normally you would use shared storage like NFS, AWS S3, GCS or Azure. A local filesystem is fine for a lab, and is **not** suitable for a real multi-node cluster — every node must see the *same* storage at the *same* path.
 
-Normally you would save the snapshots to share storage like NFS, AWS S3 etc.   In this demo we use the local filesystem `/tmp` this is not recommended in production.
-
-
-This can all be done in the kibana GUI https://www.elastic.co/guide/en/elasticsearch/reference/8.15/snapshot-restore.html
+This can all be done in the Kibana GUI too: **Stack Management → Snapshot and Restore**.
 
 ## Check that path.repo is set
 
 ```json
-GET /_nodes?pretty&filter_path=nodes.*.settings.path
+GET /_nodes?filter_path=nodes.*.settings.path
 
-// output
-
+// output - note "repo" is an ARRAY
 {
-  "nodes" : {
-    "HKbyLT8xRMC08bJO32XNFg" : {
-      "settings" : {
-        "path" : {
-          "logs" : "/usr/share/elasticsearch/logs",
-          "home" : "/usr/share/elasticsearch",
-          "repo" : "/tmp"
+  "nodes": {
+    "l9IFSEfFRbKkGWVRBDr_uA": {
+      "settings": {
+        "path": {
+          "logs": "/usr/share/elasticsearch/logs",
+          "home": "/usr/share/elasticsearch",
+          "repo": ["/mount/backups"]
         }
       }
     }
   }
 }
 ```
-As you can see the `path.repo` is set to `/tmp`.
+If `repo` is absent from that output, the setting did not apply — recreate the container.
 
 ## Register the backup location
+
+:bulb: `location` must be `path.repo` itself, or a subdirectory of it. Using a subdirectory lets you keep several repositories side by side.
+
 ```json
-PUT /_snapshot/my_test_backup
+PUT /_snapshot/my_backup
 {
-    "type": "fs",
-    "settings": {
-        "location": "/tmp/test1",
-        "compress": true
-    }
+  "type": "fs",
+  "settings": {
+    "location": "/mount/backups",
+    "compress": true
+  }
 }
 
 // output
+{ "acknowledged" : true }
+```
 
+Always verify — this proves every node can actually reach and write to the location:
+```json
+POST /_snapshot/my_backup/_verify
+
+// output - lists the nodes that succeeded
+{ "nodes": { "l9IFSEfFRbKkGWVRBDr_uA": { "name": "9485c45670c2" } } }
+```
+
+A repository under a subdirectory, if you want more than one:
+```json
+PUT /_snapshot/totality_repo
 {
-  "acknowledged" : true
+  "type": "fs",
+  "settings": { "location": "/mount/backups/totality", "compress": true }
 }
 ```
-Notice that `/tmp` needed to be available and that you can then append a path to that.  eg. `/tmp/test1`
+Elasticsearch creates the subdirectory for you; it must be *inside* `path.repo`.
 
 
 ## Make a snapshot, to that registered location
@@ -676,7 +722,7 @@ PUT _snapshot/my_repository
 {
   "type": "fs",
   "settings": {
-    "location": "/tmp/my_repository",
+    "location": "/mount/backups/my_repository",
     "compress": true
   }
 }
@@ -794,7 +840,7 @@ PUT /_snapshot/my_snapshots
 {
     "type": "fs",
     "settings": {
-        "location": "/tmp/snapshots",
+        "location": "/mount/backups/snapshots",
         "compress": true
     }
 }

@@ -2892,7 +2892,16 @@ A complete backup covers the data, the cluster configuration, and the security c
 
 ### Register a repository
 
-`path.repo` must be set in `elasticsearch.yml` on **every** node, to an identical path.
+`path.repo` must be set on **every** node, to an identical path. Mounting a directory is not enough — without `path.repo` Elasticsearch rejects the repository with `doesn't match any of the locations specified by path.repo`, which looks like a missing-directory error.
+
+The `docker-compose.yml` in this repo already does both halves:
+```yaml
+    environment:
+      - path.repo=/mount/backups     # tells ES the path is allowed
+    volumes:
+      - ./backups:/mount/backups     # makes the path exist
+```
+:warning: Editing compose does not change a running container — `mkdir -p backups && docker compose up -d elasticsearch` to apply it. Full explanation in [Cluster_Management.md](Cluster_Management.md).
 
 ```json
 GET /_nodes?filter_path=nodes.*.settings.path.repo
@@ -2901,7 +2910,7 @@ PUT /_snapshot/totality_repo
 {
   "type": "fs",
   "settings": {
-    "location": "/tmp/totality_repo",
+    "location": "/mount/backups/totality_repo",
     "compress": true
   }
 }
@@ -2916,7 +2925,7 @@ POST /_snapshot/totality_repo/_verify
 | `url` | read-only |
 | `source` | `_source` only — smaller, needs a reindex to restore |
 
-:warning: `/tmp` is fine for a lab and wrong for production — use NFS, S3, GCS or Azure.
+:warning: A local bind mount is fine for a lab and wrong for production — every node must see the **same** storage at the **same** path, so use NFS, S3, GCS or Azure.
 
 ### Take a snapshot
 

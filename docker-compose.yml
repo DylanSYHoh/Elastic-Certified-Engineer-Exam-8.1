@@ -8,11 +8,15 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      # Required for snapshot repositories. Elasticsearch refuses to register an
+      # `fs` repo at any path not listed here, even if the volume is mounted.
+      - path.repo=/mount/backups
     ports:
       - "9200:9200"
       - "9300:9300"
     volumes:
       - esdata:/usr/share/elasticsearch/data
+      - ./backups:/mount/backups
     networks:
       - elk
     healthcheck:
