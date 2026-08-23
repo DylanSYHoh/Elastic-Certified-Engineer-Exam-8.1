@@ -7,6 +7,22 @@
 
 > :books: The 8.1-era objectives "Highlight the search terms in the response of a query" and "Define and use a search template" are **no longer listed for 8.15**. They are kept at the bottom of this file as bonus material.
 
+## :floppy_disk: Prerequisite data
+
+This file uses the **bank accounts** dataset (`accounts.json`, 1000 docs) and the **Shakespeare** dataset. Load them before starting, or every exercise below returns zero hits:
+
+```bash
+curl -k -u "elastic:Password01" -H "Content-Type: application/x-ndjson" \
+  -XPOST "localhost:9200/accounts-raw/_bulk?refresh" --data-binary "@accounts.json"
+```
+```json
+GET accounts-raw/_count     // expect 1000
+```
+
+:warning: `accounts.json` action lines are `{"index":{"_id":"1"}}` with **no `_index`**, so the index name must go in the URL. Let `accounts-raw` be **dynamically mapped** — do not create the `accounts-*` index template from [Data_Management.md](Data_Management.md) first, or `gender` becomes a plain `keyword` and every `gender.keyword` query here silently returns nothing.
+
+See the [Datasets section of the README](README.md) for all three datasets and how to load them.
+
 ---
 
 # Sort the results of a query by a given set of requirements

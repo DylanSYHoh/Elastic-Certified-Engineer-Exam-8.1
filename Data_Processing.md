@@ -9,6 +9,22 @@
 
 > :books: "Define and use a custom analyzer" and "Configure an index so that it properly maintains the relationships of nested arrays of objects" are **no longer separate objectives** in 8.15. Custom analyzers are still needed for the multi-fields objective so they stay inline below; nested objects are moved to a clearly-marked bonus section at the bottom.
 
+## :floppy_disk: Prerequisite data
+
+This file uses the **bank accounts** dataset (`accounts.json`, 1000 docs) and the **Shakespeare** dataset. Load them before starting, or every exercise below returns zero hits:
+
+```bash
+curl -k -u "elastic:Password01" -H "Content-Type: application/x-ndjson" \
+  -XPOST "localhost:9200/accounts-raw/_bulk?refresh" --data-binary "@accounts.json"
+```
+```json
+GET accounts-raw/_count     // expect 1000
+```
+
+:warning: `accounts.json` action lines are `{"index":{"_id":"1"}}` with **no `_index`**, so the index name must go in the URL. Let `accounts-raw` be **dynamically mapped** — do not create the `accounts-*` index template from [Data_Management.md](Data_Management.md) first, or `gender` becomes a plain `keyword` and every `gender.keyword` query here silently returns nothing.
+
+See the [Datasets section of the README](README.md) for all three datasets and how to load them.
+
 ---
 
 #  Define a mapping that satisfies a given set of requirements
@@ -788,28 +804,28 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.15/processors.html
 
 ## Processors you should recognise on sight
 
-| Processor | Does |
-| --- | --- |
-| `set` | set a field to a value (supports `{{{field}}}` mustache templating) |
-| `append` | add a value to an array field (creates the array if needed) |
-| `remove` | delete a field |
-| `rename` | rename a field |
-| `convert` | change type: `integer`, `long`, `float`, `double`, `string`, `boolean`, `ip`, `auto` |
-| `gsub` | regex replace inside a string field |
-| `split` / `join` | string ↔ array |
-| `trim`, `lowercase`, `uppercase` | string cleanup |
-| `grok` | parse unstructured text into fields with named patterns |
-| `dissect` | faster, simpler alternative to grok for fixed-delimiter text |
-| `date` | parse a string into `@timestamp` |
-| `date_index_name` | route a doc to a date-based index |
-| `json` | parse a JSON string into an object |
-| `kv` | parse `key=value` pairs |
-| `dot_expander` | turn `a.b` into a nested object |
-| `script` | anything the above cannot do (Painless) |
-| `fail` / `drop` | reject or silently discard a document |
-| `pipeline` | call another pipeline |
-| `enrich` | join in data from another index (needs an enrich policy) |
-| `foreach` | run a processor over every element of an array |
+| Processor                        | Does                                                                                 |
+|----------------------------------|--------------------------------------------------------------------------------------|
+| `set`                            | set a field to a value (supports `{{{field}}}` mustache templating)                  |
+| `append`                         | add a value to an array field (creates the array if needed)                          |
+| `remove`                         | delete a field                                                                       |
+| `rename`                         | rename a field                                                                       |
+| `convert`                        | change type: `integer`, `long`, `float`, `double`, `string`, `boolean`, `ip`, `auto` |
+| `gsub`                           | regex replace inside a string field                                                  |
+| `split` / `join`                 | string ↔ array                                                                       |
+| `trim`, `lowercase`, `uppercase` | string cleanup                                                                       |
+| `grok`                           | parse unstructured text into fields with named patterns                              |
+| `dissect`                        | faster, simpler alternative to grok for fixed-delimiter text                         |
+| `date`                           | parse a string into `@timestamp`                                                     |
+| `date_index_name`                | route a doc to a date-based index                                                    |
+| `json`                           | parse a JSON string into an object                                                   |
+| `kv`                             | parse `key=value` pairs                                                              |
+| `dot_expander`                   | turn `a.b` into a nested object                                                      |
+| `script`                         | anything the above cannot do (Painless)                                              |
+| `fail` / `drop`                  | reject or silently discard a document                                                |
+| `pipeline`                       | call another pipeline                                                                |
+| `enrich`                         | join in data from another index (needs an enrich policy)                             |
+| `foreach`                        | run a processor over every element of an array                                       |
 
 ## Options every processor supports
 

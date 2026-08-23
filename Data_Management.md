@@ -127,6 +127,24 @@ PUT _index_template/accounts-tmpl
 }
 ```
 
+:warning: **This template will break the `gender.keyword` exercises in the other files.** It maps `gender` as an explicit `keyword`, so `gender.keyword` does not exist. Every other file in this repo queries `accounts-raw` on `gender.keyword`, which only exists when the index is **dynamically** mapped (`text` plus an automatic `.keyword` sub-field).
+
+Because `index_patterns` is `accounts-*`, this template matches `accounts-raw` too. So:
+
+- **Load `accounts-raw` first, then create this template.** An existing index is never re-mapped by a new template, so the data you loaded keeps its dynamic mapping and `gender.keyword` keeps working.
+- Or narrow the pattern to something that cannot hit your data index, e.g. `["accounts-tmpl-*"]`.
+- Or, if you have already created it and your `gender.keyword` queries return zero, delete the template and reload the data:
+  ```json
+  DELETE _index_template/accounts-tmpl
+  DELETE accounts-raw
+  ```
+  then bulk load `accounts.json` again (see the [README](README.md)).
+
+Check which mapping you actually have before debugging a zero-hit query:
+```json
+GET accounts-raw/_mapping/field/gender
+```
+
 :warning: Do **not** set `"_source": { "enabled": false }` in a template you intend to reindex from later — `_reindex`, `_update_by_query` and `_source` filtering all need it.
 
 ## Test a template **without** creating anything

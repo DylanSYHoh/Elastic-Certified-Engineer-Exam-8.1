@@ -4,11 +4,72 @@ Practice notes and worked exercises for the **Elastic Certified Engineer** exam,
 
 Originally based on https://github.com/mohclips/Elastic-Certified-Engineer-Exam-Notes (7.x), then updated for 8.1, and now re-aligned to the 8.15 objective list.
 <br>
-The `example.md` file and the `.json` files in the `example-date` folder go together to provide an end-to-end example that walks you through each step. Make sure to be able to do everything and understand each aspect.
-<br>
-Use `shakespeare_6.0.json` with the other `.md` files to walk through those examples.
-<br>
 Big thank you to Cosmospnw.com for their reliable data.
+
+## What each file is
+
+| File | What it is | How to use it |
+| --- | --- | --- |
+| [example.md](example.md) | **Guided end-to-end walkthrough.** One dataset, every objective in order, each with a :question: task and a collapsed solution. | The main drill. Try each task before revealing the answer. |
+| [Data_Management.md](Data_Management.md), [Searching_Data.md](Searching_Data.md), [Developing_Search_Applications.md](Developing_Search_Applications.md), [Data_Processing.md](Data_Processing.md), [Cluster_Management.md](Cluster_Management.md) | **Per-objective reference + exercises.** Deeper coverage of one exam section each, with the syntax tables, gotchas and API options. | Go here when a topic in `example.md` doesn't stick, or to revise one weak area. |
+| [concepts_and_terms.md](concepts_and_terms.md) | **Glossary.** Plain-English definitions of the concepts the exam assumes. | Skim early, revisit when a term confuses you. |
+| [documentation_reference.md](documentation_reference.md) | **Link index**, objective by objective, all pointing at the 8.15 docs. | Use it to practise *navigating the official docs*, which is all you get on exam day. |
+
+:warning: **None of this is a timed mock exam.** Every task here shows you its answer. Real exam conditions mean 3 hours, no solutions, and only the official docs — so once the material is familiar, re-do `example.md` against a clock with the solutions collapsed.
+
+## :floppy_disk: Datasets — load these first
+
+Three datasets are used across this repo. **Load the one a file needs before starting it**, or its exercises will return zero results.
+
+| Dataset | File | Used by | Load into |
+| --- | --- | --- | --- |
+| **Eclipse totality** (190 state parks) | `example-date/full-eclipse-data.json` | [example.md](example.md) | `totality-raw` |
+| **Shakespeare** (111k lines) | `shakespeare_6.0.json` | [Searching_Data.md](Searching_Data.md), [Data_Processing.md](Data_Processing.md), [Developing_Search_Applications.md](Developing_Search_Applications.md) | `shakespeare` |
+| **Bank accounts** (1000 docs) | `accounts.json` | [Data_Processing.md](Data_Processing.md), [Developing_Search_Applications.md](Developing_Search_Applications.md), [Data_Management.md](Data_Management.md) | `accounts-raw` |
+
+A few exercises also use the **Kibana sample data** (eCommerce, Flights, Logs). Add those from **Kibana → Home → Try sample data**.
+
+### Loading them
+
+```bash
+# 1. Eclipse data - the action lines already name the index, so POST to /_bulk
+curl -k -u "elastic:Password01" -H "Content-Type: application/x-ndjson" \
+  -XPOST "localhost:9200/_bulk?refresh" --data-binary "@example-date/full-eclipse-data.json"
+```
+
+```bash
+# 2. Bank accounts - action lines have no index, so name it in the URL
+curl -k -u "elastic:Password01" -H "Content-Type: application/x-ndjson" \
+  -XPOST "localhost:9200/accounts-raw/_bulk?refresh" --data-binary "@accounts.json"
+```
+
+For Shakespeare, create the mapping first, then bulk load:
+```json
+PUT /shakespeare
+{
+  "mappings": {
+    "properties": {
+      "speaker":       { "type": "keyword" },
+      "play_name":     { "type": "keyword" },
+      "line_id":       { "type": "integer" },
+      "speech_number": { "type": "integer" }
+    }
+  }
+}
+```
+```bash
+curl -k -u "elastic:Password01" -H "Content-Type: application/x-ndjson" \
+  -XPOST "localhost:9200/shakespeare/_bulk?refresh" --data-binary "@shakespeare_6.0.json"
+```
+
+Verify all three:
+```json
+GET totality-raw/_count     // 190
+GET accounts-raw/_count     // 1000
+GET shakespeare/_count      // 111396
+```
+
+:warning: **Load `accounts-raw` *before* you create the `accounts-*` index template** in [Data_Management.md](Data_Management.md). That template maps `gender` as an explicit `keyword`, whereas every `gender.keyword` query elsewhere in the repo relies on `accounts-raw` having been **dynamically** mapped (`text` + a `.keyword` sub-field). Create the template first and those queries silently return zero hits. See the warning in [Data_Management.md](Data_Management.md) for the details and the fix.
 
 ## :rotating_light: Version warning
 
