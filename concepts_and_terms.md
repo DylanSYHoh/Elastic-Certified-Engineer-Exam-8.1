@@ -114,9 +114,6 @@ You can change the data streams or indices of an alias at any time. If you use a
 | `scroll` | legacy bulk export | deprecated in 8.x |
 | composite agg + `after_key` | paging **buckets**, not documents | n/a |
 
-## Search Templates
-A search template is a stored search you can run with different variables. *(No longer an 8.15 objective.)*
-
 ## Term Query
 Query the data based upon a term. 
 

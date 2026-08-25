@@ -123,17 +123,6 @@ GET shakespeare/_count      // 111396
 | Implement cross-cluster replication | :white_check_mark: |
 | Automate snapshots with Snapshot Lifecycle Management | :white_check_mark: |
 
-## :books: Topics that were on older objective lists but are NOT listed for 8.15
-
-These are kept in the repo, clearly marked as **bonus**. They are still genuinely useful — several are prerequisites for the listed objectives (you cannot create a data stream without an index template, and you cannot build a multi-field with a custom analyzer without knowing analyzers) — but do not spend your last revision hours on them:
-
-- Define and use an index template for a given pattern *(prerequisite for data streams — still learn it)*
-- Define and use a custom analyzer *(folded into the multi-fields objective — still learn it)*
-- Highlight the search terms in the response of a query
-- Define and use a search template
-- Configure an index so that it properly maintains the relationships of nested arrays of objects
-- Define role-based access control using Elasticsearch Security
-
 ## Resources
 Here are some resources that you can use for studying: <br>
 https://github.com/LisaHJung/Part-6-Troubleshooting-beginner-level-Elasticsearch-Errors/blob/main/README.md <br>

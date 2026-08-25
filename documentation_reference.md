@@ -213,25 +213,6 @@ https://www.elastic.co/guide/en/elasticsearch/reference/8.15/slm-api-get-stats.h
 
 ---
 
-## :books: Bonus — dropped from the objective list, still useful
-
-Index templates for a given pattern <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.15/index-templates.html
-
-Highlighting <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.15/highlighting.html
-
-Search templates <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.15/search-template.html
-
-Nested field types and queries <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.15/nested.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.15/query-dsl-nested-query.html
-
-Role-based access control <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.15/built-in-roles.html <br>
-https://www.elastic.co/guide/en/elasticsearch/reference/8.15/security-privileges.html
-
 ---
 
 ## Generally useful
