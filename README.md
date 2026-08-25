@@ -11,11 +11,12 @@ Big thank you to Cosmospnw.com for their reliable data.
 | File | What it is | How to use it |
 | --- | --- | --- |
 | [example.md](example.md) | **Guided end-to-end walkthrough.** One dataset, every objective in order, each with a :question: task and a collapsed solution. | The main drill. Try each task before revealing the answer. |
+| [practice_questions.md](practice_questions.md) | **81 practice questions + a timed 10-task mock**, weighted towards the highest-frequency exam topics rather than one question per objective. Every query verified against a live 8.15 cluster. | Drill the topics that carry the most marks. Finish with the mock against a 3-hour clock. |
 | [Data_Management.md](Data_Management.md), [Searching_Data.md](Searching_Data.md), [Developing_Search_Applications.md](Developing_Search_Applications.md), [Data_Processing.md](Data_Processing.md), [Cluster_Management.md](Cluster_Management.md) | **Per-objective reference + exercises.** Deeper coverage of one exam section each, with the syntax tables, gotchas and API options. | Go here when a topic in `example.md` doesn't stick, or to revise one weak area. |
 | [concepts_and_terms.md](concepts_and_terms.md) | **Glossary.** Plain-English definitions of the concepts the exam assumes. | Skim early, revisit when a term confuses you. |
 | [documentation_reference.md](documentation_reference.md) | **Link index**, objective by objective, all pointing at the 8.15 docs. | Use it to practise *navigating the official docs*, which is all you get on exam day. |
 
-:warning: **None of this is a timed mock exam.** Every task here shows you its answer. Real exam conditions mean 3 hours, no solutions, and only the official docs — so once the material is familiar, re-do `example.md` against a clock with the solutions collapsed.
+:warning: **Everything here shows you its answer.** Real exam conditions mean 3 hours, no solutions, and only the official docs. Once the material is familiar, re-do `example.md` against a clock with the solutions collapsed, then sit the ten chained tasks in [Part 10 of practice_questions.md](practice_questions.md#part-10--timed-mock-ten-chained-tasks-in-three-hours), which is built to mirror the real exam's shape.
 
 ## :floppy_disk: Datasets — load these first
 
